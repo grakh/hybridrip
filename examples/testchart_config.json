@@ -1,0 +1,146 @@
+{
+ "_comment": "Конфиг для тестовой шкалы. Кривые компенсации выключены (линейные), чтобы на форме было видно: тон в зонах перехода не меняется. В рабочем конфиге (configs/flexo_default.json) кривые включены.",
+ "dpi": 2400,
+ "blend_mode": "morph",
+ "transition_mm": 2.0,
+ "compression": "lzw",
+ "previews": true,
+ "angles": {
+  "C": 67.5,
+  "M": 37.5,
+  "Y": 82.5,
+  "K": 7.5
+ },
+ "screens": {
+  "am": {
+   "lpi": 150,
+   "shape": "euclid",
+   "min_dot": 0.02,
+   "curve": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  "line": {
+   "lpi": 150,
+   "shape": "line",
+   "angle_offset": 0,
+   "min_dot": 0.02,
+   "curve": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  },
+  "fm": {
+   "element_px": 3,
+   "seed": 1,
+   "min_dot": 0.005,
+   "curve": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  }
+ },
+ "criteria": {
+  "tone": {
+   "anchors": [
+    [
+     0.0,
+     "fm"
+    ],
+    [
+     0.04,
+     "fm"
+    ],
+    [
+     0.1,
+     "am"
+    ],
+    [
+     0.8,
+     "am"
+    ],
+    [
+     0.92,
+     "line"
+    ],
+    [
+     1.0,
+     "line"
+    ]
+   ]
+  },
+  "detail": {
+   "enabled": true,
+   "screen": "fm",
+   "radius_mm": 0.4,
+   "low": 0.08,
+   "high": 0.2,
+   "strength": 0.8
+  },
+  "masks": [
+   {
+    "rect_mm": [
+     0,
+     17,
+     27,
+     18
+    ],
+    "screen": "line"
+   },
+   {
+    "rect_mm": [
+     53,
+     17,
+     27,
+     18
+    ],
+    "screen": "fm"
+   }
+  ]
+ },
+ "preview_crops_mm": [
+  [
+   2,
+   2,
+   22,
+   10
+  ],
+  [
+   18,
+   20,
+   18,
+   12
+  ],
+  [
+   44,
+   20,
+   18,
+   12
+  ],
+  [
+   30,
+   45,
+   16,
+   12
+  ]
+ ]
+}

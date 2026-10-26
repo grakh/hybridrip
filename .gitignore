@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+# локальные настройки пользователя (компенсация по умолчанию)
+settings.json
+# результаты растрирования
+examples/out/
+calibration/
+out/
+hybridrip_out/
+*.log
+# кэш blue-noise пересоздаётся автоматически, но храним готовые маски для скорости
+!hybridrip/_cache/

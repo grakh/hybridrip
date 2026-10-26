@@ -1,0 +1,105 @@
+{
+  "_comment": "Флексо, 2400 dpi, 150 lpi. Света 0–4 % — FM, переход к AM к 10 %, AM в средних тонах, в тенях (>92 %) линейчатый растр. Мелкие детали добавляют долю FM. Ширина переходов 1.5 мм. Компенсация растискивания задаётся файлами промеров в папке compensation (выбор в окне), здесь кривые линейные.",
+  "dpi": 2400,
+  "input_ppi": null,
+  "blend_mode": "morph",
+  "transition_mm": 1.5,
+  "compression": "lzw",
+  "upsample": "linear",
+  "strip_rows": 512,
+  "previews": true,
+  "angles": {
+    "C": 67.5,
+    "M": 37.5,
+    "Y": 82.5,
+    "K": 7.5
+  },
+  "screens": {
+    "am": {
+      "lpi": 150,
+      "shape": "euclid",
+      "min_dot": 0.02,
+      "curve": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    "line": {
+      "lpi": 150,
+      "shape": "line",
+      "angle_offset": 0,
+      "min_dot": 0.02,
+      "curve": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    "fm": {
+      "element_px": 3,
+      "seed": 1,
+      "min_dot": 0.005,
+      "curve": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    }
+  },
+  "criteria": {
+    "tone": {
+      "anchors": [
+        [
+          0.0,
+          "fm"
+        ],
+        [
+          0.04,
+          "fm"
+        ],
+        [
+          0.1,
+          "am"
+        ],
+        [
+          0.8,
+          "am"
+        ],
+        [
+          0.92,
+          "line"
+        ],
+        [
+          1.0,
+          "line"
+        ]
+      ]
+    },
+    "detail": {
+      "enabled": true,
+      "screen": "fm",
+      "radius_mm": 0.4,
+      "low": 0.1,
+      "high": 0.3,
+      "strength": 0.7
+    },
+    "masks": []
+  },
+  "preview_crops_mm": []
+}

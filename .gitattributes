@@ -1,0 +1,9 @@
+*.bat text eol=crlf
+*.csv text eol=crlf
+*.txt text eol=crlf
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.tif binary
+*.png binary
+*.npy binary

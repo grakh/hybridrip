@@ -142,3 +142,70 @@ def make_chart(out_dir: str, cfg: dict, steps=DEFAULT_STEPS, patch_mm: float = 1
     })
     log(f"  -> {tif}\n  -> {csv}")
     return tif, csv
+
+
+# ============================================================== шкала микроструктур
+SURFACE_ROWS = (
+    ("stoch c1", {"pattern": "stoch", "cell_px": 1}),
+    ("stoch c2", {"pattern": "stoch", "cell_px": 2}),
+    ("grid p4", {"pattern": "grid", "period_px": 4, "angle": 45}),
+    ("grid p6", {"pattern": "grid", "period_px": 6, "angle": 45}),
+    ("lines p4", {"pattern": "lines", "period_px": 4, "angle": 45}),
+    ("bayer c1", {"pattern": "bayer", "cell_px": 1}),
+)
+SURFACE_DENS = (0, 5, 10, 15, 20, 25, 30, 40)
+
+
+def make_surface_chart(out_dir: str, cfg: dict, rows=SURFACE_ROWS, dens=SURFACE_DENS,
+                       patch_mm: float = 12.0, gap_mm: float = 3.0, log=print) -> str:
+    """Плашки с разными узорами (строки) и плотностью проколов (столбцы) при текущих
+    ободке и мин. элементе. Печатают, меряют оптическую плотность плашки и выбирают лучший."""
+    from .surface import SurfaceScreen
+    from .tiffio import BilevelTiffWriter
+    dpi = float(cfg.get("dpi", 2400))
+    px = dpi / 25.4
+    base = dict(cfg.get("surface") or {})
+    base["enabled"] = True
+    margin, label_w, title_h, num_h = 5.0, 24.0, 9.0, 6.0
+    W_mm = 2 * margin + label_w + len(dens) * (patch_mm + gap_mm)
+    H_mm = 2 * margin + title_h + num_h + len(rows) * (patch_mm + gap_mm)
+    W, H = int(round(W_mm * px)), int(round(H_mm * px))
+    img = np.zeros((H, W), np.uint8)
+
+    def text(s, x_mm, y_mm, size_mm):
+        t = np.zeros((H, W), np.uint8)
+        scale = size_mm * px / 30.0
+        cv2.putText(t, s, (int(x_mm * px), int(y_mm * px)), cv2.FONT_HERSHEY_SIMPLEX,
+                    scale, 255, max(1, int(scale * 2.2)), cv2.LINE_AA)
+        img[t > 127] = 1
+
+    p = SurfaceScreen(base).p
+    text(f"HybridRIP surface screening  {dpi:g} dpi  rim {float(p['rim_px']):g} px  fade {float(p['fade_px']):g} px  "
+         f"min {float(p['min_size_px']):g} px  {_dt.date.today().isoformat()}", margin, margin + title_h * 0.65, 3.6)
+    y = margin + title_h
+    x0 = margin + label_w
+    for j, d in enumerate(dens):
+        text(f"{d}%", x0 + j * (patch_mm + gap_mm) + 2.0, y + num_h * 0.7, 3.2)
+    y += num_h
+    for label, params in rows:
+        text(label, margin, y + patch_mm * 0.6, 3.6)
+        for j, d in enumerate(dens):
+            sp = dict(base); sp.update(params); sp["density"] = d / 100.0
+            ss = SurfaceScreen(sp)
+            xa = x0 + j * (patch_mm + gap_mm)
+            ya_, yb_ = int(round(y * px)), int(round((y + patch_mm) * px))
+            xa_, xb_ = int(round(xa * px)), int(round((xa + patch_mm) * px))
+            m = ss.margin
+            blk = np.zeros((yb_ - ya_ + 2 * m, xb_ - xa_ + 2 * m), np.uint8)
+            blk[m:-m, m:-m] = 1
+            ss.apply_unpacked(blk, ya_ - m) if ss.enabled else None
+            img[ya_:yb_, xa_:xb_] = blk[m:-m, m:-m]
+        y += patch_mm + gap_mm
+    os.makedirs(out_dir, exist_ok=True)
+    tif = os.path.join(out_dir, f"surface_chart_{dpi:g}dpi_rim{float(p['rim_px']):g}.tif")
+    w = BilevelTiffWriter(tif, W, H, dpi, rows_per_strip=64, compression=cfg.get("compression", "lzw"))
+    for yy in range(0, H, 1024):
+        w.write_rows(img[yy:yy + 1024].astype(bool))
+    w.close()
+    log(f"Шкала микроструктур: {W_mm:.0f}×{H_mm:.0f} мм, {len(rows)} узоров × {len(dens)} плотностей\n  -> {tif}")
+    return tif

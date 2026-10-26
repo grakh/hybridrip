@@ -23,6 +23,7 @@ from .screens import periodic_threshold, FMScreen, load_bluenoise
 from .criteria import build_weights, SCREENS
 from .tiffio import BilevelTiffWriter, ink_max
 from . import kernel as K
+from .surface import SurfaceScreen
 
 DEFAULT_ANGLES = {"C": 67.5, "M": 37.5, "Y": 82.5, "K": 7.5}
 
@@ -79,6 +80,31 @@ def _numba_missing():
         f"Причина: {K.NUMBA_ERROR}\n"
         "Установите его в ЭТОТ Python командой:\n"
         f'"{sys.executable}" -m pip install --user numba')
+
+
+def edge_mask(ink: np.ndarray, imax: float, radius: int = 2) -> np.ndarray:
+    """Маска контуров на входном разрешении: рядом (в радиусе radius пикселей) есть и
+    пусто (<= 2 %), и сплошная (>= 98 %). Там вместо растрирования — резкий край по 50 %,
+    серые пиксели сглаживания дают субпиксельное положение края. Плавные переходы
+    (фото, растяжки) такого скачка не имеют и растрируются как обычно. Считается полосами."""
+    H, W = ink.shape
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * radius + 1, 2 * radius + 1))
+    out = np.zeros((H, W), np.uint8)
+    lo_t, hi_t = 0.02 * imax, 0.98 * imax
+    step = 4096
+    for y in range(0, H, step):
+        a, b = max(0, y - radius), min(H, y + step + radius)
+        blk = ink[a:b]
+        lo = (blk <= lo_t).astype(np.uint8)
+        hi = (blk >= hi_t).astype(np.uint8)
+        if not lo.any() or not hi.any():
+            continue
+        for x in range(0, W, 30000):                  # cv2: стороны до 32767 px
+            xa, xb = max(0, x - radius), min(W, x + 30000 + radius)
+            e = cv2.dilate(lo[:, xa:xb], k) & cv2.dilate(hi[:, xa:xb], k)
+            out[y:min(H, y + step), x:min(W, x + 30000)] = \
+                e[y - a:y - a + min(step, H - y), x - xa:x - xa + min(30000, W - x)]
+    return out
 
 
 def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
@@ -140,12 +166,19 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
     W8 = (W + 7) // 8
     pf = int(cfg.get("preview_factor", 0)) or max(1, math.ceil(max(W, H) / int(cfg.get("preview_max_px", 3000))))
     rows = max(pf, (int(cfg.get("strip_pixels", 16_000_000)) // max(W, 1)) // pf * pf)
-    buf = np.empty((rows, W8), np.uint8)
-    counts = np.empty(rows, np.int64)
+    use_edge = bool(cfg.get("hard_edges", True))
+    edge = edge_mask(ink, imax) if use_edge else np.zeros((1, 1), np.uint8)
+    surf = SurfaceScreen(cfg.get("surface"))
+    mg = surf.margin if surf.enabled else 0          # запас строк сверху/снизу для distance transform
+    buf = np.empty((rows + 2 * mg, W8), np.uint8)
+    counts = np.empty(rows + 2 * mg, np.int64)
+    removed_total = 0
     writer = BilevelTiffWriter(out_path, W, H, dpi, rows_per_strip=64,
                                compression=cfg.get("compression", "lzw"))
     log(f"  выход {W}×{H} px ({W / dpi * 25.4:.0f}×{H / dpi * 25.4:.0f} мм @ {dpi:g} dpi), "
         f"угол {angle:g}°, сетка весов {Wc}×{Hc}")
+    if surf.enabled:
+        log(f"  {surf.describe()}")
     prev_rows = []
     crops = cfg.get("preview_crops_mm", [])
     crop_bufs = [[] for _ in crops]
@@ -155,13 +188,27 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
     try:
         for y0 in range(0, H, rows):
             n = min(rows, H - y0)
-            out = buf[:n]
-            K.render_strip(y0, W, out, ink, 1.0 / imax, 1.0 / scale,
+            ya, yb = max(0, y0 - mg), min(H, y0 + n + mg)
+            big = buf[:yb - ya]
+            K.render_strip(ya, W, big, ink, 1.0 / imax, 1.0 / scale,
                            w, cppi / dpi, curves, min_dots,
                            dpi / am_lpi, math.cos(a1), math.sin(a1), K.SHAPES[am_shape], am_lut, am_smin, am_sinv,
                            dpi / ln_lpi, math.cos(a2), math.sin(a2), K.SHAPES[ln_shape], ln_lut, ln_smin, ln_sinv,
-                           fms.mask, fms.e, emp_F, use_emp, mode, selector, counts[:n])
-            covered += int(counts[:n].sum())
+                           fms.mask, fms.e, emp_F, use_emp, mode, selector,
+                           edge, use_edge, counts[:yb - ya])
+            if surf.enabled:
+                u8 = np.unpackbits(big, axis=1)[:, :W]
+                u8 = np.ascontiguousarray(u8)
+                surf.apply_unpacked(u8, ya)
+                core = u8[y0 - ya:y0 - ya + n]
+                before = int(counts[y0 - ya:y0 - ya + n].sum())
+                out = np.packbits(core, axis=1)
+                c_after = int(core.sum())
+                removed_total += before - c_after
+                covered += c_after
+            else:
+                out = big
+                covered += int(counts[:n].sum())
             writer.write_packed(out)
             if preview_dir and n >= pf:
                 prev_rows.append(K.block_coverage(out[: (n // pf) * pf], W, pf))
@@ -188,7 +235,10 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
         "dpi": dpi, "angle": angle, "coverage_out": covered / (W * H),
         "coverage_in": expected, "seconds": round(time.time() - t0, 1), **info,
         "compensation": (cfg.get("compensation_applied") or {}).get("name", ""),
+        "surface_removed": removed_total / (W * H),
     }
+    if surf.enabled:
+        log(f"  микроструктура: проколото {100 * removed_total / (W * H):.2f} % площади листа")
     if preview_dir:
         os.makedirs(preview_dir, exist_ok=True)
         safe = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in name)

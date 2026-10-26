@@ -131,6 +131,25 @@ def _bilinear(img, fx, fy):
 
 
 @njit(cache=True, fastmath=True, inline="always")
+def _is_edge(edge, fx, fy):
+    """Попадает ли точка в маску контуров (любой из 4 ближайших входных пикселей)."""
+    h, w = edge.shape
+    if fx < 0.0:
+        fx = 0.0
+    if fy < 0.0:
+        fy = 0.0
+    if fx > w - 1:
+        fx = w - 1.0
+    if fy > h - 1:
+        fy = h - 1.0
+    x0 = int(fx)
+    y0 = int(fy)
+    x1 = min(x0 + 1, w - 1)
+    y1 = min(y0 + 1, h - 1)
+    return edge[y0, x0] | edge[y0, x1] | edge[y1, x0] | edge[y1, x1]
+
+
+@njit(cache=True, fastmath=True, inline="always")
 def _lut(curve, t):
     n = curve.shape[0] - 1
     p = t * n
@@ -148,7 +167,7 @@ def render_strip(y0, Wreal, out, ink, ink_inv_max, inv_scale,
                  am_p, am_ca, am_sa, am_shape, am_lut, am_smin, am_sinv,
                  ln_p, ln_ca, ln_sa, ln_shape, ln_lut, ln_smin, ln_sinv,
                  fm_mask, fm_e,
-                 emp_F, use_emp, mode, selector,
+                 emp_F, use_emp, mode, selector, edge, use_edge,
                  counts):
     nrows, nbytes = out.shape
     W = nbytes * 8
@@ -168,6 +187,12 @@ def render_strip(y0, Wreal, out, ink, ink_inv_max, inv_scale,
                     break
                 fx = (x + 0.5) * inv_scale - 0.5
                 t = _bilinear(ink, fx, fy) * ink_inv_max
+                if use_edge and _is_edge(edge, fx, fy):
+                    # контур «сплошная / пусто»: режем по 50 % — гладкий край без растровой бахромы
+                    if t >= 0.5:
+                        byte |= 128 >> bit
+                        cnt += 1
+                    continue
                 if t <= zero_tol:
                     continue
                 # веса растров

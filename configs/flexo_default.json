@@ -101,5 +101,17 @@
     },
     "masks": []
   },
-  "preview_crops_mm": []
+  "preview_crops_mm": [],
+  "hard_edges": true,
+  "surface": {
+    "enabled": false,
+    "pattern": "stoch",
+    "density": 0.15,
+    "rim_px": 4,
+    "fade_px": 4,
+    "min_size_px": 24,
+    "cell_px": 1,
+    "period_px": 4,
+    "angle": 45
+  }
 }

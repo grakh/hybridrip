@@ -34,7 +34,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("HybridRIP — гибридный растр AM / линейка / FM")
-        self.minsize(760, 700)
+        self.minsize(780, 760)
         self.q = queue.Queue()
         self.worker = None
         self.v = {}
@@ -88,6 +88,8 @@ class App(tk.Tk):
         field(3, 0, "Смешивание", "mode", width=10, values=["morph", "dither"])
         field(3, 2, "Мин. точка AM, %", "min_am")
         field(4, 0, "Сжатие TIFF", "compression", width=10, values=["lzw", "deflate", "packbits", "none"])
+        ttk.Checkbutton(p, text="Резкие контуры (плашки и текст без растровой бахромы)",
+                        variable=self._var("hard_edges", True, tk.BooleanVar)).grid(row=4, column=2, columnspan=2, sticky="w", **pad)
 
         # --- выбор растра по тону
         t = ttk.LabelFrame(root, text="Растр по тону (%)", padding=8)
@@ -120,6 +122,24 @@ class App(tk.Tk):
         ttk.Button(k, text="Контрольная шкала", command=lambda: self.make_chart(True)).grid(row=1, column=2, **pad)
         ttk.Button(k, text="Добавить промер…", command=self.import_comp).grid(row=1, column=3, columnspan=2, sticky="w", **pad)
         self.refresh_comp(select_default=True)
+
+        # --- микроструктура плашек
+        m = ttk.LabelFrame(root, text="Микроструктура плашек (сплошной ободок по контуру)", padding=8)
+        m.pack(fill="x", pady=(8, 0))
+        ttk.Checkbutton(m, text="Включить", variable=self._var("surf_on", False, tk.BooleanVar)).grid(row=0, column=0, sticky="w", **pad)
+        def mf(r, c, label, key, values=None, width=6):
+            ttk.Label(m, text=label).grid(row=r, column=c, sticky="e", **pad)
+            var = self._var(key)
+            w = (ttk.Combobox(m, textvariable=var, values=values, width=width, state="readonly")
+                 if values else ttk.Entry(m, textvariable=var, width=width))
+            w.grid(row=r, column=c + 1, sticky="w", **pad)
+        mf(0, 1, "Узор", "surf_pattern", ["stoch", "grid", "lines", "bayer"], 7)
+        mf(0, 3, "Проколы, %", "surf_density")
+        mf(0, 5, "Ободок, px", "surf_rim")
+        mf(1, 1, "Шаг, px (grid/lines)", "surf_period")
+        mf(1, 3, "Угол", "surf_angle", ["45", "0"], 4)
+        mf(1, 5, "Мин. элемент, px", "surf_min")
+        ttk.Button(m, text="Шкала микроструктур", command=self.make_surface_chart).grid(row=0, column=7, rowspan=2, **pad)
 
         # --- кнопки
         b = ttk.Frame(root)
@@ -294,6 +314,33 @@ class App(tk.Tk):
         self.worker = threading.Thread(target=work, daemon=True)
         self.worker.start()
 
+    def make_surface_chart(self):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self.ensure_libs():
+            return
+        try:
+            cfg = self.collect()
+        except Exception as e:
+            messagebox.showerror("HybridRIP", f"Ошибка в параметрах:\n{e}")
+            return
+        out = self.v["out"].get() or os.path.join(HERE, "calibration")
+        self.btn_run.state(["disabled"])
+
+        def work():
+            def log(msg="", end="\n", **_):
+                self.q.put(("log", msg, end))
+            try:
+                from hybridrip.calibration import make_surface_chart
+                tif = make_surface_chart(out, cfg, log=log)
+                log("Напечатайте шкалу, измерьте оптическую плотность плашек и выберите узор и % проколов "
+                    "с наибольшей плотностью и ровной плашкой.")
+                self.q.put(("done", [{"file": tif}], None))
+            except Exception:
+                self.q.put(("error", traceback.format_exc(), None))
+        self.worker = threading.Thread(target=work, daemon=True)
+        self.worker.start()
+
     # ------------------------------------------------------------- конфиг
     def load_config(self, path):
         try:
@@ -326,6 +373,16 @@ class App(tk.Tk):
             self.v[k].set(f"{100 * val:g}")
         self.v["no_line"].set(not any(sp == "line" for _, sp in anchors))
         self.v["detail"].set(bool(c.get("criteria", {}).get("detail", {}).get("enabled", False)))
+        self.v["hard_edges"].set(bool(c.get("hard_edges", True)))
+        from hybridrip.surface import DEFAULTS as SD
+        sf = dict(SD); sf.update(c.get("surface") or {})
+        self.v["surf_on"].set(bool(sf["enabled"]))
+        self.v["surf_pattern"].set(sf["pattern"])
+        self.v["surf_density"].set(f"{100 * float(sf['density']):g}")
+        self.v["surf_rim"].set(str(sf["rim_px"]))
+        self.v["surf_period"].set(str(sf["period_px"]))
+        self.v["surf_angle"].set(f"{float(sf['angle']):g}")
+        self.v["surf_min"].set(str(sf["min_size_px"]))
 
     def collect(self):
         """Значения из формы -> словарь конфигурации."""
@@ -353,6 +410,14 @@ class App(tk.Tk):
         det = crit.setdefault("detail", {"screen": "fm", "radius_mm": 0.4, "low": 0.1, "high": 0.3, "strength": 0.7})
         det["enabled"] = bool(self.v["detail"].get())
         c["compensation"] = self.selected_comp_path()
+        c["hard_edges"] = bool(self.v["hard_edges"].get())
+        sf = c.setdefault("surface", {})
+        sf.update({"enabled": bool(self.v["surf_on"].get()), "pattern": self.v["surf_pattern"].get(),
+                   "density": num("surf_density") / 100, "rim_px": num("surf_rim"),
+                   "period_px": int(num("surf_period")), "angle": num("surf_angle"),
+                   "min_size_px": num("surf_min")})
+        if not (0 <= sf["density"] <= 0.6):
+            raise ValueError("Проколы микроструктуры: 0–60 %")
         return c
 
     def save_config(self):

@@ -13,7 +13,8 @@ def main(argv=None):
                                  description="Гибридное растрирование AM / линейчатый / FM с плавными переходами")
     ap.add_argument("input", nargs="?", help="TIFF (CMYK/grayscale, 8/16 бит), PNG/JPG или PDF/PS (нужен Ghostscript)")
     ap.add_argument("-c", "--config", default=None, help="JSON-конфигурация")
-    ap.add_argument("-o", "--out", default="out", help="папка для результата")
+    ap.add_argument("-o", "--out", default=None,
+                    help="папка для результата (по умолчанию — output_dir из settings.json, иначе ./out)")
     ap.add_argument("--dpi", type=float, help="разрешение устройства (перекрывает конфиг)")
     ap.add_argument("--ppi", type=float, help="разрешение входа, если в файле не указано")
     ap.add_argument("--mode", choices=["morph", "dither"], help="способ смешивания растров")
@@ -42,7 +43,8 @@ def main(argv=None):
         cfg["compensation"] = None if a.comp.lower() in ("none", "-") else a.comp
     elif "compensation" not in cfg:
         cfg["compensation"] = comp.load_settings().get("default_compensation") or None
-    run(a.input, cfg, a.out, cfg_dir=os.path.dirname(os.path.abspath(cfg_path)))
+    out = a.out or comp.load_settings().get("output_dir") or "out"
+    run(a.input, cfg, out, cfg_dir=os.path.dirname(os.path.abspath(cfg_path)))
 
 
 if __name__ == "__main__":

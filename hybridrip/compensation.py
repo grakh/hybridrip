@@ -49,13 +49,21 @@ SETTINGS_PATH = os.path.join(HERE, "settings.json")
 
 # ============================================================== настройки
 def load_settings() -> dict:
-    s = {"compensation_dir": "compensation", "default_compensation": ""}
+    s = {"compensation_dir": "compensation", "default_compensation": "", "output_dir": ""}
     try:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             s.update(json.load(f))
     except Exception:
         pass
     return s
+
+
+def set_setting(key: str, value):
+    """Изменить одну настройку, не трогая остальные."""
+    s = load_settings()
+    if s.get(key) != value:
+        s[key] = value
+        save_settings(s)
 
 
 def save_settings(s: dict):

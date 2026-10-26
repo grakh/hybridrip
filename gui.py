@@ -40,6 +40,7 @@ class App(tk.Tk):
         self.v = {}
         self._build()
         self.load_config(DEFAULT_CFG)
+        self.v["out"].set(comp.load_settings().get("output_dir", ""))   # папка результата из settings.json
         self.after(100, self._poll)
 
     # ------------------------------------------------------------- интерфейс
@@ -187,9 +188,10 @@ class App(tk.Tk):
             self.v["gs"].set(p)
 
     def pick_out(self):
-        p = filedialog.askdirectory()
+        p = filedialog.askdirectory(initialdir=self.v["out"].get() or None)
         if p:
             self.v["out"].set(p)
+            comp.set_setting("output_dir", p)          # запоминается для следующих запусков
 
     def use_testchart(self):
         self.v["input"].set(os.path.join(HERE, "examples", "testchart_cmyk.tif"))
@@ -510,6 +512,8 @@ class App(tk.Tk):
                 return
         self.btn_run.state(["disabled"])
         self.progress["value"] = 0
+        if not os.path.abspath(out).startswith(os.path.join(HERE, "examples")):
+            comp.set_setting("output_dir", out)          # тестовую папку examples/out не запоминаем
         self._log(f"=== {os.path.basename(inp)} → {out}\n")
         cfg_dir = os.path.dirname(os.path.abspath(self.cfg_path))
         self.worker = threading.Thread(target=self._work, args=(inp, cfg, out, cfg_dir), daemon=True)

@@ -19,6 +19,9 @@ from hybridrip.engine import run  # noqa: E402
 from hybridrip import compensation as comp  # noqa: E402
 
 DEFAULT_CFG = os.path.join(HERE, "configs", "flexo_default.json")
+# файлы из репозитория — их не перезаписываем (иначе git pull откажется обновлять)
+PROTECTED = {os.path.normcase(os.path.abspath(p)) for p in
+             (DEFAULT_CFG, os.path.join(HERE, "examples", "testchart_config.json"))}
 
 
 def open_folder(path):
@@ -39,7 +42,9 @@ class App(tk.Tk):
         self.worker = None
         self.v = {}
         self._build()
-        self.load_config(DEFAULT_CFG)
+        st = comp.load_settings()
+        cfg_saved = st.get("config") or ""
+        self.load_config(cfg_saved if cfg_saved and os.path.isfile(cfg_saved) else DEFAULT_CFG)
         self.v["out"].set(comp.load_settings().get("output_dir", ""))   # папка результата из settings.json
         self.after(100, self._poll)
 
@@ -180,6 +185,7 @@ class App(tk.Tk):
                                        filetypes=[("JSON", "*.json")])
         if p:
             self.load_config(p)
+            comp.set_setting("config", p)              # запоминается для следующих запусков
 
     def pick_gs(self):
         p = filedialog.askopenfilename(title="gswin64c.exe",
@@ -429,13 +435,20 @@ class App(tk.Tk):
             messagebox.showerror("HybridRIP", str(e))
             return
         p = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")],
-                                         initialdir=os.path.join(HERE, "configs"))
+                                         initialdir=os.path.join(HERE, "configs"),
+                                         initialfile="my_settings.json")
+        if p and os.path.normcase(os.path.abspath(p)) in PROTECTED:
+            messagebox.showwarning(
+                "HybridRIP", "Это стандартный файл программы — он обновляется с GitHub и "
+                             "перезаписывать его нельзя.\nСохраните под другим именем, например my_settings.json.")
+            return
         if p:
             c.pop("compensation", None)        # компенсация выбирается в окне, не в конфиге
             with open(p, "w", encoding="utf-8") as fh:
                 json.dump(c, fh, ensure_ascii=False, indent=2)
             self.v["config"].set(p)
             self.cfg, self.cfg_path = c, p
+            comp.set_setting("config", p)
 
     # ------------------------------------------------------------- запуск
     # ------------------------------------------------------------- установка библиотек

@@ -325,3 +325,41 @@ def render_with_ghostscript(path: str, ppi: float, page: int = 1):
         name = f.split("(", 1)[1].rsplit(")", 1)[0]
         seps.append((name, (lambda f=f: read_gray_ink(f))))   # читаем по одной
     return seps, float(ppi)
+
+
+def list_separations(path: str) -> list[str]:
+    """Имена сепараций входного файла — быстро, без полного чтения.
+    TIFF — из тегов (InkNames), PDF/PS — рендер Ghostscript на 10 ppi."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".tif", ".tiff"):
+        import tifffile
+        with tifffile.TiffFile(path) as t:
+            p = t.pages[0]
+            spp = int(p.samplesperpixel)
+            photometric = p.photometric.name if p.photometric is not None else ""
+            names = None
+            if "InkNames" in p.tags:
+                names = [s for s in str(p.tags["InkNames"].value).split("\0") if s]
+        if spp == 1:
+            return [os.path.splitext(os.path.basename(path))[0]]
+        if photometric == "SEPARATED":
+            base = names or ["C", "M", "Y", "K", "S5", "S6", "S7", "S8"]
+            return [base[i] if i < len(base) else f"S{i + 1}" for i in range(spp)]
+        return ["K"]
+    if ext in (".pdf", ".ps", ".eps", ".ai"):
+        gs = find_ghostscript()
+        tmp = tempfile.mkdtemp(prefix="hrip_ls_")
+        out = os.path.join(tmp, "sep.tif")
+        r = subprocess.run([gs, "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=tiffsep", "-r10",
+                            "-dFirstPage=1", "-dLastPage=1", f"-sOutputFile={out}", path],
+                           capture_output=True, text=True)
+        files = glob.glob(os.path.join(tmp, "sep(*).tif"))
+        names = [f.split("(", 1)[1].rsplit(")", 1)[0] for f in files]
+        import shutil
+        shutil.rmtree(tmp, True)
+        if r.returncode != 0 and not names:
+            raise RuntimeError(f"Ghostscript: {r.stderr or r.stdout}")
+        return sorted(names, key=lambda n: (_PROCESS_ORDER.get(n.lower(), 10), n))
+    from PIL import Image
+    with Image.open(path) as im:
+        return list("CMYK") if im.mode == "CMYK" else [os.path.splitext(os.path.basename(path))[0]]

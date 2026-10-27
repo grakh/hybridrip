@@ -22,6 +22,9 @@ def main(argv=None):
     ap.add_argument("--comp", help="компенсация: имя файла из папки compensation, путь или none "
                                    "(по умолчанию — из settings.json)")
     ap.add_argument("--list-comp", action="store_true", help="показать файлы компенсаций и выйти")
+    ap.add_argument("--angle", action="append", default=[], metavar="ИМЯ=ГРАДУСЫ",
+                    help='угол сепарации, можно несколько раз: --angle "PANTONE 485*=22.5" --angle C=15')
+    ap.add_argument("--list-seps", action="store_true", help="показать сепарации файла и их углы, без растрирования")
     a = ap.parse_args(argv)
     from . import compensation as comp
     if a.list_comp:
@@ -35,6 +38,19 @@ def main(argv=None):
     cfg_path = a.config or os.path.join(os.path.dirname(__file__), "..", "configs", "flexo_default.json")
     with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
+    for spec in a.angle:
+        if "=" not in spec:
+            ap.error(f"--angle {spec}: нужно ИМЯ=ГРАДУСЫ")
+        k, v = spec.rsplit("=", 1)
+        cfg.setdefault("angles", {})[k.strip()] = float(v.replace(",", "."))
+    if a.list_seps:
+        from .tiffio import list_separations
+        from .angles import angle_for
+        lib = comp.load_settings().get("spot_angles", {})
+        for i, n in enumerate(list_separations(a.input)):
+            ang, src = angle_for(n, i, cfg, lib)
+            print(f"  {n:30s} {ang:6g}°  ({src})")
+        return 0
     if a.dpi: cfg["dpi"] = a.dpi
     if a.ppi: cfg["input_ppi"] = a.ppi
     if a.mode: cfg["blend_mode"] = a.mode

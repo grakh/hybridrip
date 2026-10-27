@@ -94,6 +94,9 @@ class App(tk.Tk):
         field(3, 0, "Смешивание", "mode", width=10, values=["morph", "dither"])
         field(3, 2, "Мин. точка AM, %", "min_am")
         field(4, 0, "Сжатие TIFF", "compression", width=10, values=["lzw", "deflate", "packbits", "none"])
+        ttk.Button(p, text="Углы сепараций…", command=self.open_angles).grid(row=5, column=0, sticky="w", **pad)
+        self.lbl_angles = ttk.Label(p, foreground="#555")
+        self.lbl_angles.grid(row=5, column=1, columnspan=3, sticky="w", **pad)
         ttk.Checkbutton(p, text="Резкие контуры (плашки и текст без растровой бахромы)",
                         variable=self._var("hard_edges", True, tk.BooleanVar)).grid(row=4, column=2, columnspan=2, sticky="w", **pad)
 
@@ -322,6 +325,22 @@ class App(tk.Tk):
         self.worker = threading.Thread(target=work, daemon=True)
         self.worker.start()
 
+    def open_angles(self):
+        from angles_window import AnglesWindow
+        w = AnglesWindow(self)
+        self.wait_window(w)
+        self.update_angles_label()
+
+    def update_angles_label(self):
+        from hybridrip.angles import angle_for
+        job = self.cfg.get("angles", {}) or {}
+        proc = "  ".join(f"{k} {angle_for(k, 0, {'angles': job})[0]:g}°" for k in "CMYK")
+        lib = comp.load_settings().get("spot_angles", {}) or {}
+        extra = [k for k in job if k not in "CMYK"]
+        txt = proc + (f"   плашки: {', '.join(f'{k} {job[k]:g}°' for k in extra)}" if extra else "")
+        txt += f"   (библиотека плашек: {len(lib)})" if lib else ""
+        self.lbl_angles.config(text=txt)
+
     def make_surface_chart(self):
         if self.worker and self.worker.is_alive():
             return
@@ -382,6 +401,8 @@ class App(tk.Tk):
         self.v["no_line"].set(not any(sp == "line" for _, sp in anchors))
         self.v["detail"].set(bool(c.get("criteria", {}).get("detail", {}).get("enabled", False)))
         self.v["hard_edges"].set(bool(c.get("hard_edges", True)))
+        if hasattr(self, "lbl_angles"):
+            self.update_angles_label()
         from hybridrip.surface import DEFAULTS as SD
         sf = dict(SD); sf.update(c.get("surface") or {})
         self.v["surf_on"].set(bool(sf["enabled"]))

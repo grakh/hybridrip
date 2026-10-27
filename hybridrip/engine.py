@@ -36,15 +36,9 @@ def apply_curve(t: np.ndarray, pts) -> np.ndarray:
 
 
 def channel_angle(name: str, idx: int, cfg: dict) -> float:
-    ang = cfg.get("angles", {})
-    if name in ang:
-        return float(ang[name])
-    alias = {"c": "C", "cyan": "C", "m": "M", "magenta": "M",
-             "y": "Y", "yellow": "Y", "k": "K", "black": "K"}
-    if name.lower() in alias:
-        a = alias[name.lower()]
-        return float(ang.get(a, DEFAULT_ANGLES[a]))
-    return [22.5, 52.5, 82.5, 7.5, 37.5, 67.5][idx % 6]
+    """Угол сепарации (см. hybridrip/angles.py)."""
+    from .angles import angle_for
+    return angle_for(name, idx, cfg)[0]
 
 
 def _load_mask_factory(cfg_dir):
@@ -138,7 +132,8 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
     expected = float(np.where(coarse >= 0.999, 1.0, eff).mean())
 
     # --- 2. параметры растров
-    angle = channel_angle(name, idx, cfg)
+    from .angles import angle_for
+    angle, angle_src = angle_for(name, idx, cfg)
     am_lpi = float(am.get("lpi", 150))
     ln_lpi = float(ln.get("lpi", am_lpi))
     am_shape = am.get("shape", "euclid")
@@ -176,7 +171,7 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
     writer = BilevelTiffWriter(out_path, W, H, dpi, rows_per_strip=64,
                                compression=cfg.get("compression", "lzw"))
     log(f"  выход {W}×{H} px ({W / dpi * 25.4:.0f}×{H / dpi * 25.4:.0f} мм @ {dpi:g} dpi), "
-        f"угол {angle:g}°, сетка весов {Wc}×{Hc}")
+        f"угол {angle:g}° ({angle_src}), сетка весов {Wc}×{Hc}")
     if surf.enabled:
         log(f"  {surf.describe()}")
     prev_rows = []
@@ -259,12 +254,20 @@ def run(input_path: str, cfg: dict, out_dir: str, cfg_dir: str = ".", log=print)
         raise _numba_missing()
     from .compensation import apply as apply_compensation
     cfg = apply_compensation(cfg, log)
+    if "spot_angles" not in cfg:                 # библиотека углов плашек из settings.json
+        from .compensation import load_settings
+        cfg = dict(cfg, spot_angles=load_settings().get("spot_angles", {}))
     log("Чтение входа…")
     seps, ppi = read_any(input_path, cfg.get("input_ppi"))
     only = cfg.get("separations")
     os.makedirs(out_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(input_path))[0]
     results = []
+    from .angles import angle_for, conflicts
+    plan = {n: angle_for(n, i, cfg) for i, (n, _) in enumerate(seps) if not only or n in only}
+    log("Углы: " + ", ".join(f"{n} {a:g}°" for n, (a, _) in plan.items()))
+    for x, y in conflicts({n: a for n, (a, _) in plan.items()}):
+        log(f"  ВНИМАНИЕ: у «{x}» и «{y}» одинаковый угол — возможен муар, если они печатаются друг на друга")
     for i, (name, ink) in enumerate(seps):
         if only and name not in only:
             continue

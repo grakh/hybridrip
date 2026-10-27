@@ -67,14 +67,31 @@ struct HRParams {
     int64_t nthreads;           // 0 = все ядра
 };
 
+// cos(2πu) для u ∈ [-0.5, 0.5] по таблице с линейной интерполяцией:
+// погрешность < 3e-7 — на результат почти не влияет, но в несколько раз быстрее std::cos.
+static const int COS_N = 4096;
+struct CosTable {
+    double v[COS_N + 2];
+    CosTable() { for (int i = 0; i <= COS_N + 1; ++i) v[i] = std::cos(6.283185307179586 * ((double)i / COS_N - 0.5)); }
+};
+static const CosTable g_cos;
+
+static inline double cos2pi(double u) {
+    double p = (u + 0.5) * COS_N;
+    if (p < 0.0) p = 0.0;
+    if (p > (double)COS_N) p = (double)COS_N;
+    const int i = (int)p;
+    const double f = p - (double)i;
+    return g_cos.v[i] + (g_cos.v[i + 1] - g_cos.v[i]) * f;
+}
+
 static inline double spot(int64_t shape, double u, double v) {
-    const double tau = 6.283185307179586;
     switch (shape) {
-        case 0: return -(std::cos(tau * u) + std::cos(tau * v));
+        case 0: return -(cos2pi(u) + cos2pi(v));
         case 1: return u * u + v * v;
-        case 2: return -(std::cos(tau * u) + 0.75 * std::cos(tau * v));
+        case 2: return -(cos2pi(u) + 0.75 * cos2pi(v));
         case 3: return std::max(std::fabs(u), std::fabs(v));
-        default: return -std::cos(tau * u);
+        default: return -cos2pi(u);
     }
 }
 

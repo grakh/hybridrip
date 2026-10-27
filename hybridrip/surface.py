@@ -175,6 +175,10 @@ class SurfaceScreen:
             d2 = cv2.distanceTransform(1 - core, cv2.DIST_L2, 5)
             dist[((d2 + dist) > self.R + 1.5) & (core == 0)] = 0.0
         removed = np.zeros(u8.shape[0], np.int64)
+        from . import native
+        if native.available():          # узор всегда задан плиткой-маской (stoch / grid / lines / bayer)
+            return native.surface_pass(u8, dist, ya, self.rim, self.fade, self.density,
+                                       self.mask, self.cell)
         _surface_pass(u8, dist, ya, self.rim, self.fade, self.density, self.ptype,
                       self.mask, self.cell, self.period, self.ca, self.sa, self.shape,
                       self.lut, self.smin, self.sinv, removed)

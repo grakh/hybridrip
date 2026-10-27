@@ -23,6 +23,7 @@ from .screens import periodic_threshold, FMScreen, load_bluenoise
 from .criteria import build_weights, SCREENS
 from .tiffio import BilevelTiffWriter, ink_max
 from . import kernel as K
+from . import native
 from .surface import SurfaceScreen
 
 DEFAULT_ANGLES = {"C": 67.5, "M": 37.5, "Y": 82.5, "K": 7.5}
@@ -74,9 +75,22 @@ def _downsample(ink: np.ndarray, size) -> np.ndarray:
     return out
 
 
+def backend_name() -> str:
+    if native.available():
+        return native.describe()
+    if K.HAVE_NUMBA:
+        return f"Numba ({native.describe()})"
+    return "нет ядра"
+
+
+def _check_backend():
+    if not native.available() and not K.HAVE_NUMBA:
+        raise _numba_missing()
+
+
 def _numba_missing():
     return RuntimeError(
-        "Не загружается пакет numba (нужен для быстрого растрирования).\n"
+        f"Нет вычислительного ядра: {native.describe()}, и не загружается пакет numba.\n"
         f"Причина: {K.NUMBA_ERROR}\n"
         "Установите его в ЭТОТ Python командой:\n"
         f'"{sys.executable}" -m pip install --user numba')
@@ -110,8 +124,7 @@ def edge_mask(ink: np.ndarray, imax: float, radius: int = 2) -> np.ndarray:
 def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
                       out_path: str, idx: int = 0, cfg_dir: str = ".",
                       preview_dir: str | None = None, log=print) -> dict:
-    if not K.HAVE_NUMBA:
-        raise _numba_missing()
+    _check_backend()
     t0 = time.time()
     dpi = float(cfg.get("dpi", 2400))
     scale = dpi / ppi
@@ -185,17 +198,32 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
     covered = 0
     pxmm = dpi / 25.4
     last = 0.0
+    rnd = None
+    if native.available():
+        rnd = native.Renderer(
+            ink=ink, ink_inv_max=1.0 / imax, inv_scale=1.0 / scale, wgrid=w, inv_scale_c=cppi / dpi,
+            curves=curves, min_dots=min_dots,
+            am=dict(p=dpi / am_lpi, ca=math.cos(a1), sa=math.sin(a1), shape=K.SHAPES[am_shape],
+                    lut=am_lut, smin=am_smin, sinv=am_sinv),
+            ln=dict(p=dpi / ln_lpi, ca=math.cos(a2), sa=math.sin(a2), shape=K.SHAPES[ln_shape],
+                    lut=ln_lut, smin=ln_smin, sinv=ln_sinv),
+            fm_mask=fms.mask, fm_e=fms.e, emp_F=emp_F, use_emp=use_emp, mode=mode,
+            selector=selector, edge=edge, use_edge=use_edge, Wreal=W,
+            nthreads=int(cfg.get("threads", 0)))
     try:
         for y0 in range(0, H, rows):
             n = min(rows, H - y0)
             ya, yb = max(0, y0 - mg), min(H, y0 + n + mg)
             big = buf[:yb - ya]
-            K.render_strip(ya, W, big, ink, 1.0 / imax, 1.0 / scale,
-                           w, cppi / dpi, curves, min_dots,
-                           dpi / am_lpi, math.cos(a1), math.sin(a1), K.SHAPES[am_shape], am_lut, am_smin, am_sinv,
-                           dpi / ln_lpi, math.cos(a2), math.sin(a2), K.SHAPES[ln_shape], ln_lut, ln_smin, ln_sinv,
-                           fms.mask, fms.e, emp_F, use_emp, mode, selector,
-                           edge, use_edge, counts[:yb - ya])
+            if rnd is not None:
+                rnd.render(ya, big, counts[:yb - ya])
+            else:
+                K.render_strip(ya, W, big, ink, 1.0 / imax, 1.0 / scale,
+                               w, cppi / dpi, curves, min_dots,
+                               dpi / am_lpi, math.cos(a1), math.sin(a1), K.SHAPES[am_shape], am_lut, am_smin, am_sinv,
+                               dpi / ln_lpi, math.cos(a2), math.sin(a2), K.SHAPES[ln_shape], ln_lut, ln_smin, ln_sinv,
+                               fms.mask, fms.e, emp_F, use_emp, mode, selector,
+                               edge, use_edge, counts[:yb - ya])
             if surf.enabled:
                 u8 = np.unpackbits(big, axis=1)[:, :W]
                 u8 = np.ascontiguousarray(u8)
@@ -211,7 +239,9 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
                 covered += int(counts[:n].sum())
             writer.write_packed(out)
             if preview_dir and n >= pf:
-                prev_rows.append(K.block_coverage(out[: (n // pf) * pf], W, pf))
+                pv = out[: (n // pf) * pf]
+                prev_rows.append(native.block_coverage(pv, W, pf) if rnd is not None
+                                 else K.block_coverage(pv, W, pf))
             for ci, (cx, cy, cw, ch) in enumerate(crops):
                 cx0, cy0 = int(cx * pxmm), int(cy * pxmm)
                 cx1, cy1 = min(W, int((cx + cw) * pxmm)), int((cy + ch) * pxmm)
@@ -255,10 +285,10 @@ def screen_separation(name: str, ink: np.ndarray, ppi: float, cfg: dict,
 
 def run(input_path: str, cfg: dict, out_dir: str, cfg_dir: str = ".", log=print):
     from .tiffio import read_any
-    if not K.HAVE_NUMBA:
-        raise _numba_missing()
+    _check_backend()
     from .compensation import apply as apply_compensation
     cfg = apply_compensation(cfg, log)
+    log(f"Ядро: {backend_name()}")
     log("Чтение входа…")
     seps, ppi = read_any(input_path, cfg.get("input_ppi"))
     only = cfg.get("separations")
